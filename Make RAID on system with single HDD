@@ -1,0 +1,61 @@
+1) Загружаемся с Live CD
+	1.1 sudo apt install initramfs-tools mdadm
+	1.2 modprobe linear
+	    modprobe multipath
+	    modprobe raid0
+	    modprobe raid1
+	    modprobe raid5
+	    modprobe raid6
+	    modprobe raid10
+	1.3 sfdisk -d /dev/sda | sfdisk --force /dev/sdb полностью скопировать MBR с диска на диск
+2) Создаем MBR через fdisk, либо переносим MBR с прошлой системы
+	2.1 fdisk /dev/sda >>> n >>> p >>> 1 >>> t >>> 1 >>> fd >>> n >>> e >>> 2 >>> n >>> 5 >>> t >>> 5 >>> fd >>> w
+	2.2 тоже самое делаю для всех дисков в массиве
+	2.3 проводим проверку на массивы
+		mdadm --zero-superblock /dev/sda1
+		mdadm --zero-superblock /dev/sdb1
+3) Создаем Raid через mdadm 
+	mdadm --create /dev/md0 --level=1 --raid-disks=2 /dev/sda1 /dev/sdb1
+	mdadm --create /dev/md1 --level=1 --raid-disks=2 /dev/sda5 /dev/sdb5
+4) Форматируем
+	mkfs.ext4 /dev/md0
+	mkswap /dev/md1
+
+5) Создаем директории /mnt/ingress и /mnt/egress
+	sudo mount /dev/md0 /mnt/ingress
+	sudo mount /dev/sdc1 /mnt/egress (диск с которого переписываем систему)
+
+6) Копируем содержимое системы
+	cp -dpRvx /mnt/egress/* /mnt/ingress 
+
+7) mdadm --examine --scan >> /mnt/ingress/etc/mdadm/mdadm.conf
+
+8) blkid /dev/md0 /dev/md1
+   nano /mnt/ingress/etc/fstab
+   Заменяем UUID
+
+9) sed -e "s/dev\/sda1/dev\/md0/" -i /mnt/ingress/etc/mtab
+
+##### Делаем это только при расширении рейда на рабочей системе, если же переносим из образ на рейд то можно пропустить!!! (((((( uname -r и заносим в /mnt/ingress/etc/frub.d/09_swraid1_setup
+	menuentry 'Ubuntu, with Linux 4.4.0-31-generic RAID Temp' --class ubuntu --class gnu-linux --class gnu --class os {
+    recordfail
+    insmod mdraid1x
+    insmod ext2
+    set root='(md/0)'
+    linux   /boot/vmlinuz-4.4.0-31-generic root=/dev/md0 ro   quiet
+    initrd  /boot/initrd.img-4.4.0-31-generic
+} 
+
+ 	update-grub
+	update-initramfs -u
+
+)))))#####
+
+10) grub-install /dev/sda
+    grub-install /dev/sdb
+
+11) sudo -s
+	for f in proc sys dev ; do mount --bind /$f /media/whatever/$f ; done
+	chroot /media/whatever
+	dpkg-reconfigure grub-pc
+	exit
